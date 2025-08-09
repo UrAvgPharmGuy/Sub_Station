@@ -3,7 +3,7 @@ import io
 import os
 import pandas as pd
 import streamlit as st
-from geopy.geocoders import Nominatim
+import requests
 
 st.set_page_config(page_title="Nearby Subs Finder", layout="wide")
 
@@ -48,12 +48,14 @@ def normalize_columns(df):
 
 def reverse_geocode(lat, lon):
     try:
-        geolocator = Nominatim(user_agent="nearby_subs_app")
-        location = geolocator.reverse((lat, lon), exactly_one=True, timeout=10)
-        if location and 'address' in location.raw:
-            addr = location.raw['address']
-            city = addr.get('city') or addr.get('town') or addr.get('village') or addr.get('hamlet')
-            state = addr.get('state')
+        url = f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}&format=json"
+        headers = {"User-Agent": "nearby_subs_app"}
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            address = data.get("address", {})
+            city = address.get("city") or address.get("town") or address.get("village") or address.get("hamlet")
+            state = address.get("state")
             if city and state:
                 return f"{city}, {state}"
         return ""
