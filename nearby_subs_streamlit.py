@@ -3,6 +3,7 @@ import io
 import os
 import pandas as pd
 import streamlit as st
+from geopy.geocoders import Nominatim
 
 st.set_page_config(page_title="Nearby Subs Finder", layout="wide")
 
@@ -35,17 +36,29 @@ def normalize_columns(df):
             break
     if "out of town" in cols_lower:
         col_map[cols_lower["out of town"]] = "OT"
-    if "city/state" in cols_lower:
-        col_map[cols_lower["city/state"]] = "City/State"
     if col_map:
         df = df.rename(columns=col_map)
     required = ["Sub Name", "Lattitude", "Longitude"]
     missing = [c for c in required if c not in df.columns]
     if missing:
         raise ValueError(f"Missing required columns: {missing}. Found: {list(df.columns)}")
-    if "City/State" not in df.columns:
-        df["City/State"] = ""
+    if "OT" not in df.columns:
+        df["OT"] = ""
     return df
+
+def reverse_geocode(lat, lon):
+    try:
+        geolocator = Nominatim(user_agent="nearby_subs_app")
+        location = geolocator.reverse((lat, lon), exactly_one=True, timeout=10)
+        if location and 'address' in location.raw:
+            addr = location.raw['address']
+            city = addr.get('city') or addr.get('town') or addr.get('village') or addr.get('hamlet')
+            state = addr.get('state')
+            if city and state:
+                return f"{city}, {state}"
+        return ""
+    except:
+        return ""
 
 @st.cache_data(show_spinner=False)
 def load_excel(file, sheet_name=None):
@@ -58,13 +71,8 @@ def load_excel(file, sheet_name=None):
     df["Lattitude"] = pd.to_numeric(df["Lattitude"], errors="coerce")
     df["Longitude"] = pd.to_numeric(df["Longitude"], errors="coerce")
     df = df.dropna(subset=["Lattitude", "Longitude"]).copy()
-    if "OT" not in df.columns:
-        if "Out of Town" in df.columns:
-            df = df.rename(columns={"Out of Town": "OT"})
-        else:
-            df["OT"] = ""
     if "City/State" not in df.columns:
-        df["City/State"] = ""
+        df["City/State"] = df.apply(lambda r: reverse_geocode(r["Lattitude"], r["Longitude"]), axis=1)
     return df, xls.sheet_names, sheet
 
 def calculate_nearby(df, sub_name, radius_miles):
@@ -91,8 +99,8 @@ def calculate_nearby(df, sub_name, radius_miles):
     out = pd.DataFrame(out_rows).sort_values("Distance (mi)", ascending=True).reset_index(drop=True)
     center_point = pd.DataFrame([{
         "Sub Name": sub_name,
-        "OT": df.at[i, "OT"] if "OT" in df.columns else "",
-        "City/State": df.at[i, "City/State"] if "City/State" in df.columns else "",
+        "OT": df.at[i, "OT"],
+        "City/State": df.at[i, "City/State"],
         "Distance (mi)": 0.0,
         "Lattitude": lat0,
         "Longitude": lon0
