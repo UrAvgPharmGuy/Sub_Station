@@ -1,12 +1,13 @@
 import math
 import io
+import os
 import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="Nearby Subs Finder", layout="wide")
 
 st.title("📍 Nearby Subs Finder")
-st.caption("Upload your Excel and find which other subs are within a chosen radius of a given Sub Name.")
+st.caption("Upload your Excel or use the bundled default to find subs within a chosen radius of a given Sub Name.")
 
 # -----------------------------
 # Utilities
@@ -22,13 +23,8 @@ def miles_distance(lat1, lon1, lat2, lon2):
     return 2 * R * math.asin(math.sqrt(max(0.0, a)))
 
 def normalize_columns(df):
-    """Try to standardize to columns: Sub Name, Lattitude, Longitude.
-    Accept common variants and rename accordingly.
-    """
-    # Strip whitespace from headers
+    """Standardize to columns: Sub Name, Lattitude, Longitude (accepts common variants)."""
     df.columns = [str(c).strip() for c in df.columns]
-
-    # Mapping of accepted variants
     col_map = {}
     cols_lower = {c.lower(): c for c in df.columns}
 
@@ -39,8 +35,7 @@ def normalize_columns(df):
             break
 
     # Latitude (intentionally prefer Lattitude to match user file)
-    lat_candidates = ["lattitude", "latitude", "lat"]
-    for cand in lat_candidates:
+    for cand in ["lattitude", "latitude", "lat"]:
         if cand in cols_lower:
             col_map[cols_lower[cand]] = "Lattitude"
             break
@@ -58,7 +53,6 @@ def normalize_columns(df):
     missing = [c for c in required if c not in df.columns]
     if missing:
         raise ValueError(f"Missing required columns: {missing}. Found: {list(df.columns)}")
-
     return df
 
 @st.cache_data(show_spinner=False)
@@ -67,7 +61,6 @@ def load_excel(file, sheet_name=None):
     sheet = sheet_name or xls.sheet_names[0]
     df = pd.read_excel(xls, sheet_name=sheet)
     df = normalize_columns(df)
-    # Clean
     df = df.dropna(subset=["Sub Name", "Lattitude", "Longitude"]).copy()
     df["Sub Name"] = df["Sub Name"].astype(str).str.strip()
     df["Lattitude"] = pd.to_numeric(df["Lattitude"], errors="coerce")
@@ -76,54 +69,71 @@ def load_excel(file, sheet_name=None):
     return df, xls.sheet_names, sheet
 
 def calculate_nearby(df, sub_name, radius_miles):
-    # Locate center
-    center_rows = df.index[df["Sub Name"].str.lower() == sub_name.lower()].tolist()
-    if not center_rows:
+    rows = df.index[df["Sub Name"].str.lower() == sub_name.lower()].tolist()
+    if not rows:
         return pd.DataFrame(columns=["Sub Name", "Distance (mi)", "Lattitude", "Longitude"]), None
-    idx = center_rows[0]
-    lat0 = float(df.at[idx, "Lattitude"])
-    lon0 = float(df.at[idx, "Longitude"])
-
-    rows = []
+    i = rows[0]
+    lat0 = float(df.at[i, "Lattitude"])
+    lon0 = float(df.at[i, "Longitude"])
+    out_rows = []
     for j, row in df.iterrows():
-        if j == idx:
+        if j == i:
             continue
         d = miles_distance(lat0, lon0, float(row["Lattitude"]), float(row["Longitude"]))
         if d <= radius_miles:
-            rows.append({"Sub Name": row["Sub Name"], "Distance (mi)": d, "Lattitude": row["Lattitude"], "Longitude": row["Longitude"]})
-    out = pd.DataFrame(rows).sort_values("Distance (mi)", ascending=True).reset_index(drop=True)
+            out_rows.append({"Sub Name": row["Sub Name"], "Distance (mi)": d, "Lattitude": row["Lattitude"], "Longitude": row["Longitude"]})
+    out = pd.DataFrame(out_rows).sort_values("Distance (mi)", ascending=True).reset_index(drop=True)
     center_point = pd.DataFrame([{"Sub Name": sub_name, "Distance (mi)": 0.0, "Lattitude": lat0, "Longitude": lon0}])
     return out, center_point
 
 # -----------------------------
-# UI
+# Sidebar
 # -----------------------------
-
 with st.sidebar:
-    st.header("1) Upload Excel")
+    st.header("1) Data Source")
     up = st.file_uploader("Excel file (.xlsx)", type=["xlsx"])
-    selected_sheet = None
-    if up is not None:
-        try:
-            xls = pd.ExcelFile(up)
-            selected_sheet = st.selectbox("Sheet", options=xls.sheet_names, index=0 if "Query2" not in xls.sheet_names else xls.sheet_names.index("Query2"))
-        except Exception as e:
-            st.error(f"Could not read Excel: {e}")
+    st.caption("If you don't upload a file, the app will try to use **Sub_Plus_OT.xlsx** from the repo root.")
+
+    # Settings
     st.header("2) Settings")
-    radius = st.slider("Radius (miles)", 1, 50, 15, 1)
+    radius = st.slider("Radius (miles)", min_value=1, max_value=50, value=15, step=1)
     show_map = st.checkbox("Show map", value=True)
 
-if up is None:
-    st.info("👈 Upload your Excel file to get started. The app expects columns named **Sub Name**, **Lattitude** (two t's), and **Longitude**. Variants like *Latitude/Lat* and *Lon/Lng* are accepted and auto-normalized.")
-    st.stop()
+# -----------------------------
+# Load data: uploaded file OR default local file
+# -----------------------------
+df = None
+sheets = []
+used_sheet = None
+source_label = ""
 
-# Load & prep
-try:
-    df, sheets, used_sheet = load_excel(up, selected_sheet)
-except Exception as e:
-    st.error(f"Error loading data: {e}")
-    st.stop()
+if up is not None:
+    try:
+        # If user uploaded, allow picking a sheet
+        xls = pd.ExcelFile(up)
+        default_idx = 0 if "Query2" not in xls.sheet_names else xls.sheet_names.index("Query2")
+        selected_sheet = st.sidebar.selectbox("Sheet", options=xls.sheet_names, index=default_idx)
+        df, sheets, used_sheet = load_excel(up, selected_sheet)
+        source_label = "Uploaded file"
+    except Exception as e:
+        st.error(f"Could not read uploaded Excel: {e}")
+        st.stop()
+else:
+    # Try default repo file
+    default_path = "Sub_Plus_OT.xlsx"
+    if not os.path.exists(default_path):
+        st.info("👈 Upload an Excel file to get started. The app expects columns **Sub Name**, **Lattitude**, **Longitude**. Variants like *Latitude/Lat* and *Lon/Lng* are accepted.")
+        st.stop()
+    try:
+        df, sheets, used_sheet = load_excel(default_path, None)
+        source_label = f"Default file: {default_path}"
+    except Exception as e:
+        st.error(f"Error loading default file '{default_path}': {e}")
+        st.stop()
 
+# -----------------------------
+# Main UI
+# -----------------------------
 left, right = st.columns([1, 1])
 with left:
     st.subheader("Select a Sub Name")
@@ -132,9 +142,11 @@ with right:
     st.subheader("Data Summary")
     st.metric("Total subs", df["Sub Name"].nunique())
     st.metric("Rows", len(df))
-    st.caption(f"Using sheet: **{used_sheet}**")
+    st.caption(f"Source: **{source_label}** | Sheet: **{used_sheet}**")
 
-# Compute
+# -----------------------------
+# Compute and render
+# -----------------------------
 results_df, center_df = calculate_nearby(df, sub_choice, radius)
 
 st.markdown(f"### Results within **{radius} miles** of **{sub_choice}**")
@@ -151,10 +163,8 @@ else:
 # Map
 if show_map and center_df is not None and not center_df.empty:
     st.markdown("#### Map")
-    # Combine center and results so center appears too
     map_df = pd.concat([center_df.assign(Role="Center"), results_df.assign(Role="Nearby")], ignore_index=True)
-    # Streamlit expects columns named 'lat' and 'lon'
     map_df = map_df.rename(columns={"Lattitude": "lat", "Longitude": "lon"})
     st.map(map_df[["lat", "lon"]], zoom=9)
 
-st.caption("Tip: Use the sidebar to change the sheet, radius, and whether to display the map.")
+st.caption("Tip: Use the sidebar to change the data source, sheet, radius, and map display.")
