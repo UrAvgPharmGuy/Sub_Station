@@ -23,7 +23,8 @@ def miles_distance(lat1, lon1, lat2, lon2):
     return 2 * R * math.asin(math.sqrt(max(0.0, a)))
 
 def normalize_columns(df):
-    """Standardize to columns: Sub Name, Lattitude, Longitude (accepts common variants)."""
+    """Standardize to columns: Sub Name, Lattitude, Longitude (accepts common variants).
+    Keep optional 'Out of Town' column if present (for OT status)."""
     df.columns = [str(c).strip() for c in df.columns]
     col_map = {}
     cols_lower = {c.lower(): c for c in df.columns}
@@ -46,6 +47,10 @@ def normalize_columns(df):
             col_map[cols_lower[cand]] = "Longitude"
             break
 
+    # Optional: Out of Town -> OT
+    if "out of town" in cols_lower:
+        col_map[cols_lower["out of town"]] = "OT"
+
     if col_map:
         df = df.rename(columns=col_map)
 
@@ -61,17 +66,25 @@ def load_excel(file, sheet_name=None):
     sheet = sheet_name or xls.sheet_names[0]
     df = pd.read_excel(xls, sheet_name=sheet)
     df = normalize_columns(df)
+    # Clean
     df = df.dropna(subset=["Sub Name", "Lattitude", "Longitude"]).copy()
     df["Sub Name"] = df["Sub Name"].astype(str).str.strip()
     df["Lattitude"] = pd.to_numeric(df["Lattitude"], errors="coerce")
     df["Longitude"] = pd.to_numeric(df["Longitude"], errors="coerce")
     df = df.dropna(subset=["Lattitude", "Longitude"]).copy()
+    # Ensure OT column exists even if missing in data
+    if "OT" not in df.columns:
+        # If original sheet used exact "Out of Town", map to OT
+        if "Out of Town" in df.columns:
+            df = df.rename(columns={"Out of Town": "OT"})
+        else:
+            df["OT"] = ""
     return df, xls.sheet_names, sheet
 
 def calculate_nearby(df, sub_name, radius_miles):
     rows = df.index[df["Sub Name"].str.lower() == sub_name.lower()].tolist()
     if not rows:
-        return pd.DataFrame(columns=["Sub Name", "Distance (mi)", "Lattitude", "Longitude"]), None
+        return pd.DataFrame(columns=["Sub Name", "OT", "Distance (mi)", "Lattitude", "Longitude"]), None
     i = rows[0]
     lat0 = float(df.at[i, "Lattitude"])
     lon0 = float(df.at[i, "Longitude"])
@@ -81,9 +94,21 @@ def calculate_nearby(df, sub_name, radius_miles):
             continue
         d = miles_distance(lat0, lon0, float(row["Lattitude"]), float(row["Longitude"]))
         if d <= radius_miles:
-            out_rows.append({"Sub Name": row["Sub Name"], "Distance (mi)": d, "Lattitude": row["Lattitude"], "Longitude": row["Longitude"]})
+            out_rows.append({
+                "Sub Name": row.get("Sub Name", ""),
+                "OT": row.get("OT", ""),
+                "Distance (mi)": d,
+                "Lattitude": row.get("Lattitude", None),
+                "Longitude": row.get("Longitude", None),
+            })
     out = pd.DataFrame(out_rows).sort_values("Distance (mi)", ascending=True).reset_index(drop=True)
-    center_point = pd.DataFrame([{"Sub Name": sub_name, "Distance (mi)": 0.0, "Lattitude": lat0, "Longitude": lon0}])
+    center_point = pd.DataFrame([{
+        "Sub Name": sub_name,
+        "OT": df.at[i, "OT"] if "OT" in df.columns else "",
+        "Distance (mi)": 0.0,
+        "Lattitude": lat0,
+        "Longitude": lon0
+    }])
     return out, center_point
 
 # -----------------------------
@@ -153,11 +178,14 @@ st.markdown(f"### Results within **{radius} miles** of **{sub_choice}**")
 if results_df.empty:
     st.warning("No subs found within the selected radius.")
 else:
-    st.dataframe(results_df, use_container_width=True)
+    # Reorder for readability
+    show_cols = ["Sub Name", "OT", "Distance (mi)", "Lattitude", "Longitude"]
+    results_show = results_df[show_cols] if all(c in results_df.columns for c in show_cols) else results_df
+    st.dataframe(results_show, use_container_width=True)
 
     # CSV download
     csv_buf = io.StringIO()
-    results_df.to_csv(csv_buf, index=False)
+    results_show.to_csv(csv_buf, index=False)
     st.download_button("⬇️ Download CSV", data=csv_buf.getvalue(), file_name=f"nearby_{sub_choice.replace(' ', '_')}_{radius}mi.csv", mime="text/csv")
 
 # Map
