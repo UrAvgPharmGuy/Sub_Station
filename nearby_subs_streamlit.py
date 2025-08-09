@@ -3,6 +3,7 @@ import io
 import os
 import pandas as pd
 import streamlit as st
+import openpyxl
 
 st.set_page_config(page_title="Nearby Subs Finder", layout="wide")
 
