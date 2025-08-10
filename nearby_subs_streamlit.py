@@ -158,7 +158,7 @@ st.markdown(f"### Results within **{radius} miles** of **{sub_choice}**")
 if results_df.empty:
     st.warning("No subs found within the selected radius.")
 else:
-    show_cols = ["Sub Name", "OT", "City/State", "Distance (mi)", "Lattitude", "Longitude"]
+    show_cols = ["Sub Name", "OT", "City/State", "Distance (mi)"]
     results_show = results_df[show_cols] if all(c in results_df.columns for c in show_cols) else results_df
     st.dataframe(results_show, use_container_width=True)
     csv_buf = io.StringIO()
