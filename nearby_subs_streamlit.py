@@ -136,7 +136,13 @@ def calculate_nearby(df, target_value, radius_miles, search_by="name"):
                 "Longitude": row.get("Longitude", None),
             })
 
-    out = pd.DataFrame(out_rows).sort_values("Distance (mi)", ascending=True).reset_index(drop=True)
+    out = pd.DataFrame(out_rows)
+    
+    if not out.empty and "Distance (mi)" in out.columns:
+        out = out.sort_values("Distance (mi)", ascending=True).reset_index(drop=True)
+    else:
+        out = pd.DataFrame(columns=["Sub Name", "Sub", "OT", "City/State", "Distance (mi)", "Lattitude", "Longitude"])
+
 
     center_point = pd.DataFrame([{
         "Sub": df.at[i, "Sub"],
