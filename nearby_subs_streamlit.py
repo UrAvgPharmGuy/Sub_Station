@@ -102,7 +102,7 @@ def load_excel(file, sheet_name=None):
 
     # Fill City/State if missing
     if "City/State" not in df.columns:
-        df["City/State"] = df.apply(lambda r: reverse_geocode(r["Lattitude"], r["Longitude"]), axis=1)
+        df["City/State"] = ''
 
     return df, xls.sheet_names, sheet
 
@@ -188,7 +188,7 @@ if up is not None:
         st.error(f"Could not read uploaded Excel: {e}")
         st.stop()
 else:
-    default_path = "Sub_Plus_OT.xlsx"
+    default_path = "Sub_Plus_OT_with_city.xlsx"
     if not os.path.exists(default_path):
         st.info("👈 Upload an Excel file to get started.")
         st.stop()
