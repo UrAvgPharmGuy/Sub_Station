@@ -205,12 +205,12 @@ else:
 left, right = st.columns([1, 1])
 with left:
     st.subheader("Select a Target")
-    if search_by == "Sub":
-        target = st.selectbox("Sub", options=sorted(df["Sub"].dropna().unique().tolist()))
-        search_mode = "sub"
-    else:
+    if search_by == "Sub Name":
         target = st.selectbox("Sub Name", options=sorted(df["Sub Name"].dropna().unique().tolist()))
         search_mode = "name"
+    else:
+        target = st.selectbox("Sub", options=sorted(df["Sub"].dropna().unique().tolist()))
+        search_mode = "sub"
 with right:
     st.subheader("Data Summary")
     st.metric("Total subs", df["Sub Name"].nunique())
