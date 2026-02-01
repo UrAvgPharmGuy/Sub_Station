@@ -165,7 +165,7 @@ with st.sidebar:
     st.caption("If you don't upload, the app will try to use **Sub_Plus_OT.xlsx** from the repo root.")
 
     st.header("2) Search Settings")
-    search_by = st.radio("Search by", options=["Sub Name", "Sub"], index=0, horizontal=True)
+    search_by = st.radio("Search by", options=["Sub", "Sub Name"], index=0, horizontal=True)
     radius = st.slider("Radius (miles)", min_value=1, max_value=50, value=15, step=1)
     show_map = st.checkbox("Show map", value=True)
 
